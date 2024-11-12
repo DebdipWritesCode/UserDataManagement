@@ -27,8 +27,19 @@ class UploadController extends AbstractController
     #[Route('/api/upload', name: 'api_upload', methods: ['POST'])]
     public function upload(Request $request): Response
     {
-        $file = $request->files->get('file');
+        $username = $request->request->get('username');
+        
+        if (!$username) {
+            return new Response('Username is required', Response::HTTP_BAD_REQUEST);
+        }
 
+        $adminUser = $this->entityManager->getRepository(User::class)->findOneBy(['username' => $username]);
+        
+        if (!$adminUser || $adminUser->getRole() !== 'ADMIN') {
+            return new Response('Access denied: Only ADMIN users can perform this action.', Response::HTTP_FORBIDDEN);
+        }
+
+        $file = $request->files->get('file');
         if (!$file instanceof UploadedFile) {
             throw new BadRequestHttpException('No file uploaded');
         }
