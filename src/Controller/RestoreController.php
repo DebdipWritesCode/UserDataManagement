@@ -23,37 +23,58 @@ class RestoreController extends AbstractController
     #[Route('/api/restore', name: 'app_restore', methods: ['POST'])]
     public function restore(Request $request): Response
     {
-        $username = $request->request->get('username');
-
-        if (!$username) {
-            return $this->json(['error' => 'Username is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $adminUser = $this->entityManager->getRepository(User::class)->findOneBy(['username' => $username]);
-        
-        if (!$adminUser || $adminUser->getRole() !== 'ADMIN') {
-            return $this->json(['error' => 'Access denied: Only ADMIN users can perform this action.'], Response::HTTP_FORBIDDEN);
-        }
-
         $backupFilePath = $this->getParameter('kernel.project_dir') . '/public/backup.sql';
 
         if (!file_exists($backupFilePath)) {
             return $this->json(['error' => 'Backup file not found.'], Response::HTTP_NOT_FOUND);
         }
 
-        $command = sprintf(
-            'mysql --host=localhost --user=%s --password=%s %s < "%s"',
-            escapeshellarg($_ENV['DATABASE_USER']),
-            escapeshellarg($_ENV['DATABASE_PASSWORD']),
-            escapeshellarg($_ENV['DATABASE_NAME']),
-            $backupFilePath
+        $databaseHost = 'localhost';
+        $databaseUser = $_ENV['DATABASE_USER'];
+        $databasePassword = $_ENV['DATABASE_PASSWORD'];
+        $databaseName = $_ENV['DATABASE_NAME'];
+
+        $checkDbCommand = sprintf(
+            'mysql --host=%s --user=%s --password=%s -e "SHOW DATABASES LIKE \'%s\'"',
+            escapeshellarg($databaseHost),
+            escapeshellarg($databaseUser),
+            escapeshellarg($databasePassword),
+            escapeshellarg($databaseName)
         );
 
-        $process = Process::fromShellCommandline($command);
+        $process = Process::fromShellCommandline($checkDbCommand);
         
         try {
             $process->mustRun();
+            $output = $process->getOutput();
+
+            if (strpos($output, $databaseName) === false) {
+                $createDbCommand = sprintf(
+                    'mysql --host=%s --user=%s --password=%s -e "CREATE DATABASE %s;"',
+                    escapeshellarg($databaseHost),
+                    escapeshellarg($databaseUser),
+                    escapeshellarg($databasePassword),
+                    escapeshellarg($databaseName)
+                );
+
+                $process = Process::fromShellCommandline($createDbCommand);
+                $process->mustRun();
+            }
+
+            $restoreCommand = sprintf(
+                'mysql --host=%s --user=%s --password=%s %s < "%s"',
+                escapeshellarg($databaseHost),
+                escapeshellarg($databaseUser),
+                escapeshellarg($databasePassword),
+                escapeshellarg($databaseName),
+                $backupFilePath
+            );
+
+            $process = Process::fromShellCommandline($restoreCommand);
+            $process->mustRun();
+
             return $this->json(['message' => 'Database restored successfully.']);
+
         } catch (ProcessFailedException $exception) {
             return $this->json(['error' => 'Restore failed: ' . $exception->getMessage()], Response::HTTP_INTERNAL_SERVER_ERROR);
         }

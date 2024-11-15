@@ -23,19 +23,11 @@ class BackupController extends AbstractController
     #[Route('/api/backup', name: 'app_backup', methods: ['POST'])]
     public function backup(Request $request): Response
     {
-        $username = $request->request->get('username');
-        
-        if (!$username) {
-            return $this->json(['error' => 'Username is required'], Response::HTTP_BAD_REQUEST);
-        }
-
-        $adminUser = $this->entityManager->getRepository(User::class)->findOneBy(['username' => $username]);
-        
-        if (!$adminUser || $adminUser->getRole() !== 'ADMIN') {
-            return $this->json(['error' => 'Access denied: Only ADMIN users can perform this action.'], Response::HTTP_FORBIDDEN);
-        }
-
         $backupFile = 'backup.sql';
+
+        if (file_exists($backupFile)) {
+            unlink($backupFile);
+        }
 
         $command = [
             'mysqldump',

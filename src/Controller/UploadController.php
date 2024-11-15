@@ -10,35 +10,24 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
-use Symfony\Component\Mailer\MailerInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\Mailer\Messenger\SendEmailMessage;
 use Symfony\Component\Mime\Email;
 
 class UploadController extends AbstractController
 {
     private EntityManagerInterface $entityManager;
-    private MailerInterface $mailer;
+    private MessageBusInterface $messageBus;
 
-    public function __construct(EntityManagerInterface $entityManager, MailerInterface $mailer)
+    public function __construct(EntityManagerInterface $entityManager, MessageBusInterface $messageBus)
     {
         $this->entityManager = $entityManager;
-        $this->mailer = $mailer;
+        $this->messageBus = $messageBus;
     }
 
     #[Route('/api/upload', name: 'api_upload', methods: ['POST'])]
     public function upload(Request $request): Response
     {
-        $username = $request->request->get('username');
-        
-        if (!$username) {
-            return new Response('Username is required', Response::HTTP_BAD_REQUEST);
-        }
-
-        $adminUser = $this->entityManager->getRepository(User::class)->findOneBy(['username' => $username]);
-        
-        if (!$adminUser || $adminUser->getRole() !== 'ADMIN') {
-            return new Response('Access denied: Only ADMIN users can perform this action.', Response::HTTP_FORBIDDEN);
-        }
-
         $file = $request->files->get('file');
         if (!$file instanceof UploadedFile) {
             throw new BadRequestHttpException('No file uploaded');
@@ -49,9 +38,14 @@ class UploadController extends AbstractController
         $users = [];
 
         foreach ($lines as $line) {
-            if (empty($line)) continue;
+            if (empty($line)) {
+                continue;
+            }
+
             $data = str_getcsv($line);
-            if (count($data) !== 5) continue;
+            if (count($data) !== 5) {
+                continue;
+            }
 
             list($name, $email, $username, $address, $role) = $data;
 
@@ -75,7 +69,8 @@ class UploadController extends AbstractController
                 ->subject('User Data Uploaded')
                 ->text("Hello {$user->getName()}, your data has been successfully uploaded.");
 
-            $this->mailer->send($email);
+            // Dispatch the email to be sent asynchronously
+            $this->messageBus->dispatch(new SendEmailMessage($email));
         }
 
         return $this->json([
